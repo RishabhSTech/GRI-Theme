@@ -938,11 +938,12 @@ function gri_send_otp() {
     $headers = ['Content-Type: text/plain; charset=UTF-8'];
 
     // Send the OTP via email
-    if (wp_mail($email, $subject, $message, $headers)) {
-        wp_send_json_success(['message' => 'OTP sent. Please check your inbox.']);
-    } else {
-        wp_send_json_error(['message' => 'Error sending email. Please try again later.']);
-    }
+		if (wp_mail($email, $subject, $message, $headers)) {
+			wp_send_json_success(['message' => 'OTP sent. Please check your inbox.']);
+		} else {
+			wp_send_json_error(['message' => 'Error sending email. Please try again later.']);
+		}
+	}
 }
 
 function gri_verify_otp() {
