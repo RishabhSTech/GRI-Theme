@@ -594,15 +594,16 @@ function display_api_fetch_log() {
 }
 
 function gri_styled_search_form_shortcode() {
+    $query = isset($_GET['query']) ? sanitize_text_field($_GET['query']) : '';
+
     ob_start(); // Start output buffering
     ?>
     <form action="/dashboard/result/" method="get" class="gri-search-form">
-		<input type="hidden" name="jsf" value="jet-engine">
-		<input type="text" name="_s" class="gri-search-input" placeholder='"ESG", "Data protection", "HealthCare", "Artificial Intelligence"' required>
-		<button type="submit" class="gri-search-button">
-			Search
-		</button>
-	</form>
+        <input type="text" name="query" class="gri-search-input" placeholder='"ESG", "Data protection", "HealthCare", "Artificial Intelligence"' value="<?php echo esc_attr($query); ?>" required>
+        <button type="submit" class="gri-search-button">
+            Search
+        </button>
+    </form>
     <?php
     return ob_get_clean(); // Return the buffered content
 }
@@ -612,8 +613,7 @@ function gri_legal_styled_search_form_shortcode() {
     ob_start(); // Start output buffering
     ?>
     <form action="/legal-resources-2/result-law/" method="get" class="gri-search-form">
-		<input type="hidden" name="jsf" value="jet-engine">
-		<input type="text" name="_s" class="gri-search-input" placeholder='"Work Health and Safety Act", "Labour Code", "Protection of Personal Data Law"' required>
+		<input type="text" name="query" class="gri-search-input" placeholder='"Work Health and Safety Act", "Labour Code", "Protection of Personal Data Law"' required>
 		<button type="submit" class="gri-search-button">
 			Search
 		</button>
@@ -627,8 +627,7 @@ function gri_read_styled_search_form_shortcode() {
     ob_start();
     ?>
     <form action="/read/result/" method="get" class="gri-search-form">
-		<input type="hidden" name="jsf" value="jet-engine">
-		<input type="text" name="_s" class="gri-search-input" placeholder='"Work Health and Safety Act", "Labour Code", "Protection of Personal Data Law"' required>
+		<input type="text" name="query" class="gri-search-input" placeholder='"Work Health and Safety Act", "Labour Code", "Protection of Personal Data Law"' required>
 		<button type="submit" class="gri-search-button">
 			Search
 		</button>
@@ -656,7 +655,7 @@ function gri_frequent_search_buttons() {
             $frequent_search_posts->the_post();
             $title = get_the_title();
             
-            $output .= '<a href="/dashboard/result/?jsf=jet-engine&_s=' . urlencode($title) . '" class="frequent-search-button">' . esc_html($title) . '</a>';
+            $output .= '<a href="/dashboard/result/?query' . urlencode($title) . '" class="frequent-search-button">' . esc_html($title) . '</a>';
         }
 
         $output .= '</div>';
@@ -916,22 +915,22 @@ function gri_send_otp() {
     check_ajax_referer('gri_nonce', 'security');
 
     // Sanitize and validate email
-    $email = isset($_POST['email']) ? sanitize_email($_POST['email']) : '';
-    if (!$email || !is_email($email)) {
-        wp_send_json_error(['message' => 'Invalid email address.']);
-        return;
-    }
-
-    // Check if the email already exists
-    if (email_exists($email)) {
+    if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'gri_nonce')) {
+        if (!$email || !is_email($email)) {
+            wp_send_json_error(['message' => 'Invalid nonce.']);
+            return;
+        }
+    
+        $email = sanitize_email($_POST['email']);
+    
+    if (!is_email($email)) {
         wp_send_json_error(['message' => 'User with this email already exists.']);
         return;
     }
 
     // Generate OTP and store it in a transient
     $otp = wp_rand(1000, 9999); // Use wp_rand for better randomness
-    $transient_key = 'gri_otp_' . md5($email);
-    set_transient($transient_key, $otp, 5 * MINUTE_IN_SECONDS);
+    set_transient('gri_otp_' . md5($email), $otp, 5 * MINUTE_IN_SECONDS);
 
     // Prepare email content
     $subject = "Your OTP Verification Code";
@@ -940,14 +939,13 @@ function gri_send_otp() {
 
     // Send the OTP via email
     if (wp_mail($email, $subject, $message, $headers)) {
-        wp_send_json_success(['message' => 'OTP sent successfully. Please check your inbox.']);
+        wp_send_json_success(['message' => 'OTP sent. Please check your inbox.']);
     } else {
         wp_send_json_error(['message' => 'Error sending email. Please try again later.']);
     }
 }
 
 function gri_verify_otp() {
-    // Check nonce for security
     check_ajax_referer('gri_nonce', 'security');
 
     // Sanitize and validate input
@@ -1144,22 +1142,28 @@ function load_more_suggestions() {
 }
 
 function enqueue_chatbot_script() {
-    // Enqueue your chatbot JavaScript
     wp_enqueue_script('chatbot-script', get_template_directory_uri() . '/js/chatbot.js', array('jquery'), '1.0', true);
 
-    // Get current user data
     $current_user = wp_get_current_user();
     $user_email = $current_user->user_email;
 
-    // Get current post type
+    $user_work_area = get_user_meta($current_user->ID, 'work_area', true);
+    $user_work_area = is_array($user_work_area) ? $user_work_area : explode(', ', $user_work_area);
+    $user_country = get_user_meta($current_user->ID, 'country', true);
+
     global $post;
+    if (!$post) {
+        wp_localize_script('chatbot-script', 'chatbotData', array(
+            'userEmail' => $user_email,
+            'workAreaSlug' => !empty($user_work_area) ? implode(', ', $user_work_area) : '',
+            'jurisdictionSlug' => !empty($user_country) ? urlencode($user_country) : '',
+        ));
+        return;
+    }
+
     $post_type = $post->post_type;
 
-    // Initialize taxonomies and summary field variables
     $taxonomies = [];
-    $summary_field = '';
-
-    // Define taxonomies and summary fields based on post type
     switch ($post_type) {
         case 'art':
             $taxonomies = [
@@ -1204,19 +1208,23 @@ function enqueue_chatbot_script() {
             break;
     }
 
-    // Fetch term titles and URL-encode them
+    // Fetch term titles and handle errors
     $work_area_term = get_the_terms($post->ID, $taxonomies['work_area']);
     $jurisdiction_term = get_the_terms($post->ID, $taxonomies['jurisdiction']);
 
-    // URL-encode the term titles
-    $work_area_title = ($work_area_term && !is_wp_error($work_area_term)) ? $work_area_term[0]->name : '';
-    $jurisdiction_title = ($jurisdiction_term && !is_wp_error($jurisdiction_term)) ? $jurisdiction_term[0]->name : '';
+    $work_area_title = ($work_area_term && !is_wp_error($work_area_term) && !empty($work_area_term)) 
+        ? urlencode($work_area_term[0]->name) 
+        : '';
+    $jurisdiction_title = ($jurisdiction_term && !is_wp_error($jurisdiction_term) && !empty($jurisdiction_term)) 
+        ? urlencode($jurisdiction_term[0]->name) 
+        : '';
 
-    // Pass data to JavaScript
     wp_localize_script('chatbot-script', 'chatbotData', array(
         'userEmail' => $user_email,
         'workAreaSlug' => $work_area_title,
         'jurisdictionSlug' => $jurisdiction_title,
+        'profileWorkAreas' => !empty($user_work_area) ? implode(', ', $user_work_area) : '',
+        'profileCountry' => !empty($user_country) ? urlencode($user_country) : '',
     ));
 }
 add_action('wp_enqueue_scripts', 'enqueue_chatbot_script');
